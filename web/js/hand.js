@@ -457,11 +457,52 @@ export class HandEngine {
     return this.initPromise;
   }
 
-  async _init() {
-    const urls = {
-      modelUrl: new URL("vendor/mediapipe/hand_landmarker.task", document.baseURI).href,
-      wasmUrl: new URL("vendor/mediapipe/wasm", document.baseURI).href,
+  /**
+   * Downloads the hand model and the WebAssembly engine once, reporting progress (they are ~17 MB,
+   * which takes a while on a slow connection or a cold Streamlit Cloud start). The bytes are handed
+   * to the detector as blob URLs, so nothing is downloaded twice and no loader can time out.
+   */
+  async _download() {
+    const base = new URL("vendor/mediapipe/", document.baseURI).href;
+    const { FilesetResolver } = await import("../vendor/mediapipe/vision_bundle.mjs");
+    const simd = await FilesetResolver.isSimdSupported().catch(() => true);
+    const name = simd ? "vision_wasm_internal" : "vision_wasm_nosimd_internal";
+    const files = [[`${base}hand_landmarker.task`, 7.82e6], [`${base}wasm/${name}.wasm`, 9.4e6], [`${base}wasm/${name}.js`, 2.1e5]];
+    const loaded = files.map(() => 0);
+    const totals = files.map(([, size]) => size);
+    const sum = (a) => a.reduce((s, v) => s + v, 0);
+    let last = -1;
+    const report = () => {
+      const pct = Math.min(99, Math.floor((sum(loaded) / sum(totals)) * 100));
+      if (pct !== last) this.onProgress?.((last = pct));
     };
+    const blobs = await Promise.all(files.map(async ([url], i) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Could not download ${url.split("/").pop()} (HTTP ${res.status})`);
+      const len = Number(res.headers.get("content-length"));
+      if (len && !res.headers.get("content-encoding")) totals[i] = len;
+      if (!res.body) return res.blob();
+      const reader = res.body.getReader();
+      const chunks = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded[i] += value.length;
+        report();
+      }
+      return new Blob(chunks);
+    }));
+    const url = (blob, type) => URL.createObjectURL(new Blob([blob], { type }));
+    return {
+      modelUrl: url(blobs[0], "application/octet-stream"),
+      fileset: { wasmBinaryPath: url(blobs[1], "application/wasm"), wasmLoaderPath: url(blobs[2], "text/javascript") },
+    };
+  }
+
+  async _init() {
+    const urls = await this._download();
+    this.onProgress?.(100);
     try {
       this.delegate = await this._initWorker(urls);
       this.engineMode = "WORKER";
@@ -484,7 +525,8 @@ export class HandEngine {
         worker.terminate();
         reject(err);
       };
-      const timer = setTimeout(() => fail(new Error("Hand tracking worker timed out")), 30000);
+      // Files are already downloaded, so this only covers compiling the engine on a slow PC.
+      const timer = setTimeout(() => fail(new Error("Hand tracking worker timed out")), 60000);
       worker.onmessage = ({ data }) => {
         if (data.type === "ready") {
           clearTimeout(timer);
@@ -502,7 +544,7 @@ export class HandEngine {
 
   async _initMain(urls) {
     const { FilesetResolver, HandLandmarker } = await import("../vendor/mediapipe/vision_bundle.mjs");
-    const fileset = await FilesetResolver.forVisionTasks(urls.wasmUrl);
+    const fileset = urls.fileset;
     const make = (delegate) => HandLandmarker.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: urls.modelUrl, delegate },
       runningMode: "VIDEO",

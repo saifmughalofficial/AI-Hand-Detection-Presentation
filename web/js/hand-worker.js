@@ -29,9 +29,10 @@ const create = (target) => HandLandmarker.createFromOptions(fileset, {
   minTrackingConfidence: 0.5,
 });
 
-async function init({ wasmUrl, modelUrl: model }) {
+async function init({ fileset: files, wasmUrl, modelUrl: model }) {
   modelUrl = model;
-  fileset = await FilesetResolver.forVisionTasks(wasmUrl);
+  // The page downloads the engine once and passes blob URLs; a plain folder URL also works.
+  fileset = files || await FilesetResolver.forVisionTasks(wasmUrl);
   try {
     landmarker = await create("GPU");
     delegate = "GPU";

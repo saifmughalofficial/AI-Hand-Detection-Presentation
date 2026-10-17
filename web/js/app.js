@@ -486,6 +486,7 @@ async function startCamera() {
   try {
     if (!hand.ready) {
       setMoveState("LOADING", "Loading the hand model…");
+      camUI("starting", "LOADING HAND MODEL", "Downloading the hand model, the camera starts right after…");
       await hand.init();
     }
     const [width, height] = settings.res.split("x").map(Number);
@@ -1117,11 +1118,38 @@ async function checkConverters() {
   return converters.length ? converters.join(" + ") : "PDF & images only";
 }
 
+/**
+ * The hand model (~17 MB) keeps downloading in the background after a few seconds, so the app opens
+ * at once even on a slow connection; the camera starts as soon as the model is ready.
+ */
+async function loadModel() {
+  const job = hand.init().then((detail) => {
+    sysStatus("model", detail, "ok");
+    return detail;
+  }, (err) => {
+    sysStatus("model", "UNAVAILABLE", "err");
+    log(`Hand model: ${err.message}`, "err");
+    throw err;
+  });
+  const quick = await Promise.race([job, sleep(4000).then(() => null)]);
+  if (quick) return quick;
+  log("Hand model is still downloading; it continues in the background.", "warn");
+  job.then((d) => log(`Hand model ready: ${d}.`, "ok"), () => {});
+  return "downloading in background";
+}
+
+hand.onProgress = (pct) => {
+  sysStatus("model", pct >= 100 ? "starting…" : `downloading ${pct}%`, "");
+  const line = [...$("bootLog")?.children || []].find((l) => l.textContent.includes("hand landmark"));
+  if (line && !line.querySelector(".res.ok")) line.querySelector(".res").textContent = `[ ${String(pct).padStart(3)}% ]`;
+  if (!hand.running && $("moveVal").textContent === "LOADING") setMoveState("LOADING", `Downloading hand model ${pct}%`);
+};
+
 async function boot() {
   const steps = [
     ["render", "Booting holographic 3D renderer", initVisuals],
     ["pdf", "Loading PDF engine", async () => { await loadPdfEngine(); return "PDF.js"; }],
-    ["model", "Loading hand landmark model", () => hand.init()],
+    ["model", "Loading hand landmark model", loadModel],
     ["camera", "Scanning video devices", refreshCameras],
     ["office", "Checking local office converters", checkConverters],
   ];
@@ -1131,7 +1159,7 @@ async function boot() {
     try {
       const detail = await fn();
       line.ok(detail);
-      sysStatus(key, detail || "OK", "ok");
+      if (detail !== "downloading in background") sysStatus(key, detail || "OK", "ok");
     } catch (err) {
       line.fail();
       sysStatus(key, "UNAVAILABLE", "err");
