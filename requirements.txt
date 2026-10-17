@@ -1,5 +1,6 @@
-# Streamlit Community Cloud installs this file automatically. Locally: python -m pip install -r requirements.txt
-streamlit>=1.64      # st.components.v2 (browser camera bridge)
-pymupdf>=1.24        # PDF rendering
-Pillow>=10.0         # images
-mammoth>=1.6         # Word (.docx) reader when no converter is installed
+# Streamlit deployment (app.py). Streamlit Community Cloud installs this file automatically.
+streamlit>=1.36
+
+# The desktop launcher (python main.py) needs no packages: it uses only the standard library.
+# Hand tracking (MediaPipe), PDF rendering (PDF.js) and 3D graphics (Three.js) are bundled in web/vendor.
+# The old Tkinter version in legacy/ would additionally need: opencv-python mediapipe PyMuPDF Pillow
