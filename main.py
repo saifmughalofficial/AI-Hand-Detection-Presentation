@@ -45,6 +45,7 @@ WORD_EXT = {".docx", ".doc", ".odt", ".rtf"}
 OFFICE_EXT = POWERPOINT_EXT | WORD_EXT
 
 CONVERT_LOCK = threading.Lock()
+LOCAL_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
 
 class ConversionError(Exception):
@@ -212,11 +213,28 @@ class AppHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
+        # The Streamlit version (app.py) runs on another localhost port and calls this converter
+        # cross-origin. Only pages served from this PC (localhost / 127.0.0.1) are allowed.
+        origin = self.headers.get("Origin", "")
+        if LOCAL_ORIGIN.match(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         super().end_headers()
 
     def _host_allowed(self):
         port = self.server.server_address[1]
         return self.headers.get("Host", "") in {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+    def do_OPTIONS(self):
+        if not self._host_allowed() or not LOCAL_ORIGIN.match(self.headers.get("Origin", "")):
+            return self._json({"error": "Forbidden"}, 403)
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Methods", "GET, POST")
+        self.send_header("Access-Control-Allow-Headers", "X-Requested-With, Content-Type")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _json(self, payload, status=200):
         body = json.dumps(payload).encode("utf-8")

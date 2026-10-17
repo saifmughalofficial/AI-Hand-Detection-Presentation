@@ -1,5 +1,5 @@
-# Streamlit deployment (app.py). Streamlit Community Cloud installs this file automatically.
-streamlit>=1.36
+﻿# Streamlit deployment (app.py). Streamlit Community Cloud installs this file automatically.
+streamlit>=1.40
 
 # The desktop launcher (python main.py) needs no packages: it uses only the standard library.
 # Hand tracking (MediaPipe), PDF rendering (PDF.js) and 3D graphics (Three.js) are bundled in web/vendor.

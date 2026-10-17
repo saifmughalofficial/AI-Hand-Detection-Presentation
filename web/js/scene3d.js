@@ -1,7 +1,9 @@
 // Holographic cyber scene: dotted Earth with data arcs, orbit rings, light beam, ripple floor,
-// neon skyline, falling 3D binary streams and floating hex icons. Reacts to hand gestures.
+// neon skyline, falling 3D binary streams, floating hex icons and live holographic HUD windows.
+// Reacts to hand gestures.
 import * as THREE from "../vendor/three.module.min.js";
 import { MASK_W, MASK_H, MASK_HEX } from "./worldmask.js";
+import { HoloPanels } from "./panels.js";
 
 const R = 2;
 const GREEN = 0x00ff66;
@@ -168,6 +170,8 @@ export class Scene3D {
     this.focus = null;
     this.extras = [];
     this.quality = "auto";
+    this.panelsLive = true;
+    this.background = false;
     this.prCap = 1.5;
     this.target = 60;
     this.fps = 0;
@@ -223,6 +227,7 @@ export class Scene3D {
     this._buildSkyline();
     this._buildStreams();
     this._buildIcons();
+    this.panels = new HoloPanels(this.scene);
   }
 
   _buildGlobe() {
@@ -575,6 +580,8 @@ export class Scene3D {
     this.prCap = q === "ultra" ? 2 : q === "low" ? 0.75 : 1.5;
     this.target = q === "low" ? 30 : 60;
     this.streams.visible = q !== "low";
+    this.panelsLive = q !== "low";
+    this.panels.every = 3;
     this._downgrades = 0;
     this._slowSeconds = 0;
     this.resize();
@@ -597,6 +604,7 @@ export class Scene3D {
   pulse(action) {
     this.floorMat.uniforms.uPulse.value = this.time;
     this.beamBoost = 1.6;
+    this.panels.pulse();
     const [dx, dy] = { LEFT: [-1, 0], RIGHT: [1, 0], UP: [0, 1], DOWN: [0, -1] }[action] || [0, 0];
     this.spin += dx * 2.6;
     this.kickVel.x -= dx * 5;
@@ -636,7 +644,8 @@ export class Scene3D {
     for (const fn of this.extras) fn(dt);
 
     this._acc += dt;
-    if (this.target < 60 && this._acc < 1 / this.target - 0.002) return;
+    const target = this.background ? Math.min(30, this.target) : this.target;
+    if (target < 60 && this._acc < 1 / target - 0.002) return;
     const step = Math.min(this._acc, 0.1);
     this._acc = 0;
     this._update(step);
@@ -652,22 +661,37 @@ export class Scene3D {
   }
 
   _adapt() {
-    if (this.quality !== "auto" || document.hidden) return;
+    if (this.quality !== "auto" || document.hidden || this.background) return;
     this._slowSeconds = this.fps < 45 ? this._slowSeconds + 1 : 0;
     if (this._slowSeconds < 3) return;
     this._slowSeconds = 0;
-    if (this._downgrades === 0 && this.prCap > 1) {
-      this.prCap = 1;
-      this.resize();
-      this.onNotice?.("3D effects: lowered render resolution to keep tracking smooth.");
-    } else if (this._downgrades === 1) {
-      this.streams.visible = false;
-      this.onNotice?.("3D effects: disabled 3D binary streams to keep tracking smooth.");
-    } else if (this._downgrades === 2) {
-      this.target = 30;
-      this.onNotice?.("3D effects: background capped at 30 FPS; camera tracking keeps full speed.");
+    // Each step frees GPU/CPU time for hand tracking; steps that would change nothing are skipped.
+    const steps = [
+      () => { this.panels.every = 6; return "slowed the holographic window refresh"; },
+      () => {
+        if (Math.min(window.devicePixelRatio || 1, this.prCap) <= 1) return null;
+        this.prCap = 1;
+        this.resize();
+        return "lowered render resolution";
+      },
+      () => { this.streams.visible = false; return "disabled 3D binary streams"; },
+      () => { this.target = 30; return "capped the background at 30 FPS (camera tracking keeps full speed)"; },
+    ];
+    while (this._downgrades < steps.length) {
+      const done = steps[this._downgrades++]();
+      if (done) {
+        this.onNotice?.(`3D effects: ${done} to keep tracking smooth.`);
+        return;
+      }
     }
-    this._downgrades++;
+  }
+
+  /**
+   * Background mode (a document covers the scene): 30 FPS and frozen HUD windows, so almost all
+   * of the GPU and CPU go to hand tracking and page rendering.
+   */
+  setBackground(on) {
+    this.background = on;
   }
 
   _update(dt) {
@@ -722,5 +746,7 @@ export class Scene3D {
     }
     this.beamBoost *= Math.exp(-dt * 2.5);
     for (const m of this.beamMats) m.uniforms.uBoost.value = this.beamBoost;
+    this.panels.live = this.panelsLive && !this.background;
+    this.panels.update(t, dt);
   }
 }

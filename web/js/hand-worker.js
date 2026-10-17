@@ -23,8 +23,9 @@ const create = (target) => HandLandmarker.createFromOptions(fileset, {
   baseOptions: { modelAssetPath: modelUrl, delegate: target },
   runningMode: "VIDEO",
   numHands: 1,
-  minHandDetectionConfidence: 0.65,
-  minHandPresenceConfidence: 0.6,
+  // Lower gates pick the hand up a frame or two sooner; the gesture filter rejects any noise.
+  minHandDetectionConfidence: 0.5,
+  minHandPresenceConfidence: 0.5,
   minTrackingConfidence: 0.5,
 });
 
@@ -43,6 +44,20 @@ async function init({ wasmUrl, modelUrl: model }) {
     landmarker = await create("CPU");
     delegate = "CPU";
   }
+}
+
+// Low-light boost: in a dim room the frame is brightened (and contrast lifted) before detection,
+// which keeps the landmark model confident. Frames are never shown or stored.
+let boost = null;
+function enhance(bitmap, gain) {
+  if (!(gain > 1.05)) return bitmap;
+  if (!boost || boost.width !== bitmap.width || boost.height !== bitmap.height) {
+    boost = new OffscreenCanvas(bitmap.width, bitmap.height);
+  }
+  const g = boost.getContext("2d");
+  g.filter = `brightness(${gain.toFixed(2)}) contrast(1.12)`;
+  g.drawImage(bitmap, 0, 0);
+  return boost;
 }
 
 function toHands(result) {
@@ -67,7 +82,7 @@ self.onmessage = async ({ data }) => {
     const { bitmap } = data;
     lastTs = Math.max(data.ts, lastTs + 1);
     try {
-      self.postMessage({ type: "result", hands: toHands(landmarker.detectForVideo(bitmap, lastTs)) });
+      self.postMessage({ type: "result", hands: toHands(landmarker.detectForVideo(enhance(bitmap, data.gain), lastTs)) });
     } catch (err) {
       self.postMessage({ type: "result", hands: [], error: String(err?.message || err) });
     } finally {

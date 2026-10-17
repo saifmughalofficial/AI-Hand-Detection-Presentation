@@ -1,26 +1,34 @@
 """
 AI Hand Detection Presentation - Streamlit entry point
 ======================================================
-Deploy on Streamlit Community Cloud with this file as the main file, or run locally:
+Run locally (double-click run_streamlit.bat, or):
 
-    streamlit run app.py
+    streamlit run app.py --server.port 8765 --server.address localhost
+
+then open http://localhost:8765. Deploy on Streamlit Community Cloud with this file as the main file.
 
 The interface in ./web is served unchanged as a full-page Streamlit component. Hand tracking,
 the PDF viewer and the 3D scene run in the visitor's browser, so the webcam is used on the
 visitor's own device and nothing is uploaded to the server.
 
-Differences from the desktop launcher (python main.py):
-  * PowerPoint/Word to PDF conversion needs Office or LibreOffice on the local PC, so on the web
-    open PDFs, images or DOCX (built-in reader); export PPTX to PDF first.
+Camera note: browsers only allow the webcam on https:// or on localhost. The "Network URL"
+(http://192.168.x.x:...) that Streamlit prints blocks the camera, so this page shows a link
+to the localhost address when it is opened that way.
+
+PowerPoint / Word: when the app runs on your own PC, the local converter from main.py is started
+on 127.0.0.1 (LibreOffice or Microsoft Office do the conversion; nothing leaves the PC).
 """
 
+import ipaddress
 import mimetypes
+import threading
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+CONVERTER_PORT = 8766
 
 # Streamlit serves component files with Python's MIME table. Some systems lack these entries,
 # and browsers refuse ES modules / WebAssembly served with the wrong type.
@@ -57,5 +65,46 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+def request_host():
+    """(hostname, is_local, is_https) of the address the visitor used to open the app."""
+    try:
+        headers = st.context.headers
+    except Exception:
+        return "", True, False
+    host = headers.get("Host", "") or ""
+    name = host.rsplit(":", 1)[0].strip("[]") if host.count(":") <= 1 or host.startswith("[") else host
+    is_local = name in ("localhost", "") or name.endswith(".localhost")
+    if not is_local:
+        try:
+            is_local = ipaddress.ip_address(name).is_loopback
+        except ValueError:
+            pass
+    is_https = (headers.get("X-Forwarded-Proto", "") or "").lower() == "https"
+    return name, is_local, is_https
+
+
+@st.cache_resource(show_spinner=False)
+def start_converter():
+    """Start main.py's localhost-only Office→PDF converter once per Streamlit process."""
+    try:
+        from main import make_server
+        server = make_server(CONVERTER_PORT)
+    except (Exception, SystemExit):
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True, name="office-converter").start()
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
+host, is_local, is_https = request_host()
+if not is_local and not is_https:
+    port = st.get_option("server.port")
+    st.warning(
+        f"**Camera blocked on this address ({host}).** Browsers only allow the webcam on localhost "
+        f"or https. On this PC open **http://localhost:{port}** instead.",
+        icon="📷",
+    )
+    st.link_button(f"Open http://localhost:{port}", f"http://localhost:{port}", type="primary")
+
 hand_presenter = components.declare_component("hand_presenter", path=str(WEB_DIR))
-hand_presenter(key="hand_presenter")
+hand_presenter(key="hand_presenter", converter=start_converter() if is_local else None)

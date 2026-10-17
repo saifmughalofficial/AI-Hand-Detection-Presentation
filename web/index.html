@@ -36,12 +36,13 @@
       </div>
       <div class="top-chips">
         <span class="chip"><i class="led"></i>LOCAL</span>
-        <span class="chip">FREE</span>
+        <span class="chip">100% FREE</span>
         <span class="chip">OFFLINE</span>
         <span class="chip">NO API KEYS</span>
+        <span class="chip">NO FACE · HAND ONLY</span>
       </div>
       <div class="top-right">
-        <span class="chip mono" id="fpsChip">CAM -- · AI -- · FX --</span>
+        <span class="chip mono" id="fpsChip">CAM -- · AI -- · HUD -- · FX --</span>
         <span class="clock mono" id="clock">00:00:00</span>
       </div>
     </header>
@@ -58,6 +59,7 @@
           <span class="sep"></span>
           <button class="btn" id="btnPrev" title="Previous (←)">◀ Prev</button>
           <button class="btn" id="btnNext" title="Next (→)">Next ▶</button>
+          <button class="btn icon" id="btnGrid" title="All slides (G)" aria-label="All slides">▦</button>
           <span class="sep"></span>
           <button class="btn icon" id="btnZoomOut" title="Zoom out (−)" aria-label="Zoom out">−</button>
           <span class="zoom-val mono" id="zoomVal">100%</span>
@@ -70,7 +72,7 @@
           </div>
           <span class="grow"></span>
           <span class="page-info mono" id="pageInfo">PAGE -- / --</span>
-          <button class="btn primary" id="btnPresent" title="Full-screen slides with hand control (P)">▶ Present</button>
+          <button class="btn primary present-btn" id="btnPresent" title="Full-screen slides with hand control (P)">▶ Present</button>
           <button class="btn icon" id="btnFull" title="Fullscreen (F)" aria-label="Fullscreen">⛶</button>
           <button class="btn icon danger" id="btnClose" title="Close file" aria-label="Close file">✕</button>
         </div>
@@ -88,13 +90,25 @@
                   <li data-key="office">Office files<b>…</b></li>
                 </ul>
               </div>
+              <div class="mini-panel" id="recentPanel" hidden>
+                <div class="mini-head">// RECENT FILES</div>
+                <ul class="recent mono" id="recentList"></ul>
+              </div>
               <div class="words" aria-hidden="true"><span>DETECT</span><span>TRACK</span><span>CONTROL</span><span>PRESENT</span></div>
             </div>
 
             <div class="home-center">
               <div class="eyebrow mono">// NATURAL HAND MOVEMENT CONTROL</div>
               <h2 class="hero-title">PRESENT <em>HANDS-FREE</em></h2>
-              <p class="hero-sub">Move your hand left, right, up or down. No poses, no clicker, no cloud.</p>
+              <p class="hero-sub">Move your hand. The slide follows. No poses, no clicker, no cloud, no face on screen.</p>
+              <div class="gesture-strip" aria-hidden="true">
+                <span class="g-chip" data-g="left"><i>◀</i>LEFT</span>
+                <span class="g-chip" data-g="right"><i>▶</i>RIGHT</span>
+                <span class="g-chip" data-g="up"><i>▲</i>UP</span>
+                <span class="g-chip" data-g="down"><i>▼</i>DOWN</span>
+                <span class="g-chip" data-g="in"><i>⊕</i>ZOOM IN</span>
+                <span class="g-chip" data-g="out"><i>⊖</i>ZOOM OUT</span>
+              </div>
             </div>
 
             <div class="home-side home-right">
@@ -107,7 +121,7 @@
                     <tr><td>▶</td><td>Next</td><td>Pan right</td></tr>
                     <tr><td>▲</td><td>Prev</td><td>Scroll up</td></tr>
                     <tr><td>▼</td><td>Next</td><td>Scroll down</td></tr>
-                    <tr><td>☛</td><td colspan="2">Point finger → next / ← prev</td></tr>
+                    <tr><td>☛</td><td colspan="2">Point → zoom-in next · ← zoom-out prev</td></tr>
                     <tr><td>🤏</td><td colspan="2">Pinch + move up / down = zoom</td></tr>
                     <tr><td>☝</td><td colspan="2">Finger up = laser pointer</td></tr>
                     <tr><td>✋</td><td colspan="2">1 action, then lower hand</td></tr>
@@ -128,9 +142,9 @@
               </button>
               <ol class="steps">
                 <li><b>01</b>Add file</li>
-                <li><b>02</b>Start camera</li>
+                <li><b>02</b>Camera starts</li>
                 <li><b>03</b>Hold still to calibrate</li>
-                <li><b>04</b>Move hand to control</li>
+                <li><b>04</b>Move hand · press PRESENT</li>
               </ol>
             </div>
           </div>
@@ -138,18 +152,26 @@
           <div class="slide-view" id="slideView" hidden></div>
           <div class="doc-view" id="docView" hidden><div class="doc-pages" id="docPages"></div></div>
 
+          <div class="grid-view" id="gridView" hidden>
+            <div class="grid-head mono"><span>// ALL SLIDES</span><span class="grid-hint">Click a slide · G or Esc to close</span></div>
+            <div class="grid-items" id="gridItems"></div>
+          </div>
+
           <div class="drop-overlay" aria-hidden="true"><div>DROP FILE TO LOAD</div></div>
           <div class="loader" id="loader" hidden><div class="spinner"></div><span id="loaderText">PROCESSING</span></div>
           <div class="dir-flash" id="dirFlash" aria-hidden="true"><span id="dirGlyph">❯❯❯</span></div>
+          <div class="edge-flash" id="edgeFlash" aria-hidden="true"></div>
           <div class="laser" id="laser" aria-hidden="true"></div>
           <div class="zoom-hud mono" id="zoomHud" aria-hidden="true">
             <span>ZOOM</span><b id="zoomHudVal">100%</b>
             <div class="zoom-bar"><i id="zoomHudBar"></i></div>
           </div>
           <div class="present-hud mono" id="presentHud" aria-hidden="true">
+            <span class="hud-radar"><i id="hudDot"></i></span>
             <span class="hud-hand" id="hudHand"><i></i><b id="hudHandText">NO HAND</b></span>
             <span class="hud-page" id="hudPage">-- / --</span>
           </div>
+          <div class="present-progress" aria-hidden="true"><i id="presentBar"></i></div>
           <div class="toast" id="toast" role="status" aria-live="polite"></div>
           <div class="pip" id="pip"><canvas id="pipCanvas"></canvas></div>
           <div class="corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
@@ -160,7 +182,7 @@
       <aside class="sidebar">
         <section class="panel">
           <div class="panel-head">
-            <span class="panel-title">// HAND TRACKING</span>
+            <span class="panel-title">// HAND SIGNAL</span>
             <span class="pill" id="camPill">OFFLINE</span>
           </div>
           <div class="cam" id="camBox">
@@ -170,6 +192,7 @@
               <div class="cam-off-icon" aria-hidden="true">◉</div>
               <b id="camOffTitle">CAMERA OFFLINE</b>
               <span id="camOffText">Press START CAMERA</span>
+              <a class="btn primary cam-fix" id="camFix" href="#" target="_blank" rel="noopener" hidden>Open on localhost ↗</a>
             </div>
             <div class="cam-hud mono"><span id="camRes">--</span><span id="camRate">--</span></div>
             <div class="cam-scan" aria-hidden="true"></div>
@@ -210,6 +233,33 @@
         </section>
 
         <section class="panel">
+          <div class="panel-head"><span class="panel-title">// SLIDE ANIMATION</span><span class="pill mono" id="transName">AUTO</span></div>
+          <div class="fx-grid" id="transGrid" role="radiogroup" aria-label="Slide animation">
+            <button data-t="auto" role="radio" title="Cube that follows your hand · zoom for pointing"><i class="fx-ico auto"></i>Auto</button>
+            <button data-t="cube" role="radio" title="3D cube rotation"><i class="fx-ico cube"></i>Cube</button>
+            <button data-t="flip" role="radio" title="Holographic page flip"><i class="fx-ico flip"></i>Flip</button>
+            <button data-t="push" role="radio" title="Slide pushes in the hand direction"><i class="fx-ico push"></i>Push</button>
+            <button data-t="zoom" role="radio" title="Zoom in / zoom out through the slides"><i class="fx-ico zoom"></i>Zoom</button>
+            <button data-t="hologram" role="radio" title="Hologram power-on"><i class="fx-ico holo"></i>Holo</button>
+            <button data-t="orbit" role="radio" title="Slides ride a 3D ring"><i class="fx-ico orbit"></i>Orbit</button>
+            <button data-t="door" role="radio" title="Slide swings open like a door"><i class="fx-ico door"></i>Door</button>
+            <button data-t="portal" role="radio" title="Spiral through a vortex"><i class="fx-ico portal"></i>Portal</button>
+            <button data-t="glitch" role="radio" title="Cyber glitch slices"><i class="fx-ico glitch"></i>Glitch</button>
+            <button data-t="shatter" role="radio" title="Slide shatters into flying tiles"><i class="fx-ico shatter"></i>Shatter</button>
+            <button data-t="mix" role="radio" title="A different animation every slide"><i class="fx-ico mix"></i>Mix</button>
+          </div>
+          <div class="fx-test">
+            <span class="mono">TEST</span>
+            <button class="btn icon" data-test="left" title="Animate left">◀</button>
+            <button class="btn icon" data-test="up" title="Animate up">▲</button>
+            <button class="btn icon" data-test="down" title="Animate down">▼</button>
+            <button class="btn icon" data-test="right" title="Animate right">▶</button>
+            <button class="btn icon" data-test="in" title="Zoom in">⊕</button>
+            <button class="btn icon" data-test="out" title="Zoom out">⊖</button>
+          </div>
+        </section>
+
+        <section class="panel">
           <div class="panel-head"><span class="panel-title">// CONTROL MATRIX</span></div>
           <div class="settings">
             <div class="field">
@@ -222,7 +272,7 @@
             </div>
             <div class="field">
               <label for="cool">Cooldown <output id="coolOut"></output></label>
-              <input type="range" id="cool" min="200" max="1500" step="50">
+              <input type="range" id="cool" min="150" max="1500" step="50">
             </div>
             <div class="field">
               <label for="camSelect">Camera</label>
@@ -244,33 +294,43 @@
                 </select>
               </div>
             </div>
+            <div class="field two">
+              <div>
+                <label for="detSelect">Detection</label>
+                <select id="detSelect">
+                  <option value="turbo">Turbo (every frame)</option>
+                  <option value="balanced">Balanced</option>
+                </select>
+              </div>
+              <div>
+                <label for="fxSelect">3D effects</label>
+                <select id="fxSelect">
+                  <option value="auto">Auto (60 FPS)</option>
+                  <option value="ultra">Ultra</option>
+                  <option value="low">Low</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
+            </div>
             <div class="field">
               <label for="zoomSelect">Zoom gesture</label>
               <select id="zoomSelect">
                 <option value="pinch">Pinch + move up / down (smooth)</option>
                 <option value="depth">Hand closer / farther (steps)</option>
                 <option value="off">Off (buttons / keys)</option>
-                <option value="pinch">Pinch (thumb + index)</option>
               </select>
             </div>
-            <div class="field">
-              <label for="fxSelect">3D effects</label>
-              <select id="fxSelect">
-                <option value="auto">Auto (adaptive 60 FPS)</option>
-                <option value="ultra">Ultra</option>
-                <option value="low">Low (battery saver)</option>
-                <option value="off">Off</option>
-              </select>
-            </div>
+            <label class="toggle"><input type="checkbox" id="optAuto"><span></span>Start camera automatically</label>
+            <label class="toggle"><input type="checkbox" id="optFlick"><span></span>Fast flick detection</label>
             <label class="toggle"><input type="checkbox" id="optOnce"><span></span>One page change per hand appearance</label>
             <label class="toggle"><input type="checkbox" id="optPoint"><span></span>Point finger left / right = prev / next</label>
             <label class="toggle"><input type="checkbox" id="optLaser"><span></span>Laser pointer (point finger up)</label>
-            <label class="toggle"><input type="checkbox" id="optVideo"><span></span>Show camera image (off = hand signal only)</label>
-            <label class="toggle"><input type="checkbox" id="optPip"><span></span>Show camera window while presenting</label>
+            <label class="toggle"><input type="checkbox" id="optPip"><span></span>Show hand-signal window while presenting</label>
             <label class="toggle"><input type="checkbox" id="optExposure"><span></span>Lock exposure for max camera FPS</label>
             <label class="toggle"><input type="checkbox" id="optUpDown"><span></span>Up / Down changes slides in Slide Mode</label>
             <label class="toggle"><input type="checkbox" id="optSkeleton"><span></span>Show hand skeleton</label>
-            <label class="toggle"><input type="checkbox" id="optMirror"><span></span>Mirror camera (selfie view)</label>
+            <label class="toggle"><input type="checkbox" id="optMirror"><span></span>Mirror view (selfie)</label>
+            <p class="privacy-note mono">🔒 Privacy: the camera image is never shown, stored or uploaded. Only hand landmarks are used.</p>
           </div>
         </section>
 
@@ -289,6 +349,8 @@
             <span><kbd>Space</kbd></span><span>Pause tracking</span>
             <span><kbd>C</kbd></span><span>Recalibrate</span>
             <span><kbd>M</kbd></span><span>Switch mode</span>
+            <span><kbd>T</kbd></span><span>Next slide animation</span>
+            <span><kbd>G</kbd></span><span>All slides grid</span>
             <span><kbd>P</kbd></span><span>Present (full slides)</span>
             <span><kbd>F</kbd></span><span>Fullscreen</span>
             <span><kbd>O</kbd></span><span>Open file</span>

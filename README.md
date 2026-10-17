@@ -1,3 +1,24 @@
+# AI Hand Detection Presentation — v2 (Mock)
+
+**Run:** double-click `run_streamlit.bat` → opens **http://localhost:8765** (or `python main.py` for the desktop window).
+
+> 📷 **Camera:** always open the **localhost** address. Browsers block the webcam on Streamlit's
+> "Network URL" (http://192.168.x.x) — the app now detects this and shows an "Open on localhost" button.
+
+What's new in v2:
+- **Camera fix + auto-start**, busy-camera retry, stale-camera fallback, clear fix-it messages.
+- **60 FPS**: negotiates the camera's fastest mode (60 FPS when the hardware supports it; the built-in
+  laptop camera is limited to 30). The hand HUD always animates at 60 FPS.
+- **Faster detection**: every frame goes to the model (Turbo), One Euro filter, fast-flick swipes,
+  return strokes never fire the opposite command.
+- **No face, ever**: the camera image is never drawn; only the hand signal (skeleton + radar).
+- **Slide animations** that follow the hand: up / down / left / right (3D cube), pointing = zoom in / out.
+  Styles: Auto, Cube, Flip, Push, Zoom, Hologram (press **T**). Full-screen Present mode (**P**).
+- **3D holographic HUD windows** (code, boot log, network analysis, world map, fingerprint, data stream).
+- Slide grid (**G**), recent files, PowerPoint/Word conversion now also works in the Streamlit version.
+- 100% free: no paid API, no keys, everything runs locally.
+
+---
 # AI Hand Detection Presentation (Holographic Edition)
 
 Control PDFs, PowerPoint decks, Word documents and images by moving your hand in front of a webcam.
@@ -55,20 +76,20 @@ export PPTX to PDF first, or use the desktop launcher.
 
 | Finger pose | Action |
 |---|---|
-| ☛ Index finger pointing **right** (other fingers folded) | Next slide / page |
-| ☚ Index finger pointing **left** | Previous slide / page |
-| 🤏 Pinch thumb + index, then move hand **up / down** | Smooth live zoom in / out (open fingers to finish) |
-| ☝ Index finger pointing **up** | Red laser pointer on the slide |
+| â˜› Index finger pointing **right** (other fingers folded) | Next slide / page |
+| â˜š Index finger pointing **left** | Previous slide / page |
+| ðŸ¤ Pinch thumb + index, then move hand **up / down** | Smooth live zoom in / out (open fingers to finish) |
+| â˜ Index finger pointing **up** | Red laser pointer on the slide |
 
 ### One page change per hand appearance (on by default)
 
 After a slide or page changes, nothing else fires until your hand **leaves the camera view and comes
-back**. This prevents accidental double moves while you talk. The corner HUD shows `DONE · LOWER HAND`
+back**. This prevents accidental double moves while you talk. The corner HUD shows `DONE Â· LOWER HAND`
 while waiting. Zoom and the laser pointer still work during that time. Turn this off in the Control
 Matrix if you prefer continuous swiping. A hand that is just entering the camera view never triggers
 an action: the app waits until it is steady.
 
-### Present mode (`P` or the ▶ PRESENT button)
+### Present mode (`P` or the â–¶ PRESENT button)
 
 Full-screen slides with hand control and **no camera image on screen**. Your face is never shown; only
 the hand signal is used. A big arrow flashes for each gesture, and a small corner HUD shows the hand
@@ -83,9 +104,9 @@ command. The dashed square in the camera preview shows the dead zone; it turns a
 
 ### Keyboard
 
-`←` `→` page · `↑` `↓` scroll · `+` `−` zoom · `0` fit · `Space` pause tracking · `C` recalibrate ·
-`M` switch mode · `F` fullscreen presenter · `O` open file · `Esc` stop camera ·
-`Ctrl + mouse wheel` zoom · mouse wheel turns slides in Slide Mode.
+`â†` `â†’` page Â· `â†‘` `â†“` scroll Â· `+` `âˆ’` zoom Â· `0` fit Â· `Space` pause tracking Â· `C` recalibrate Â·
+`M` switch mode Â· `F` fullscreen presenter Â· `O` open file Â· `Esc` stop camera Â·
+`Ctrl + mouse wheel` zoom Â· mouse wheel turns slides in Slide Mode.
 
 ### Fullscreen presenter
 
@@ -112,7 +133,7 @@ Without Microsoft Office, install the free [LibreOffice](https://www.libreoffice
 - **Cooldown**: minimum time between two actions.
 - **Camera / Resolution / Frame rate**: up to **60 FPS** is requested; the app uses the most your webcam supports.
 - **Lock exposure for max camera FPS** (on by default): webcams slow down in indoor light (for example
-  30 → 17 FPS). Locking the exposure keeps the camera at its full frame rate. If the room is too dark,
+  30 â†’ 17 FPS). Locking the exposure keeps the camera at its full frame rate. If the room is too dark,
   the app switches back to auto exposure by itself.
 - **Zoom gesture**: off, hand closer/farther, or pinch.
 - **3D effects**: Auto keeps the interface at 60 FPS and lowers effects only if the PC struggles.
@@ -132,7 +153,7 @@ Settings are remembered between sessions.
 ## Troubleshooting
 
 - **"Camera is busy"**: close Zoom, Teams, the Windows Camera app or any other app using the webcam.
-- **"Camera access is blocked"**: Windows Settings → Privacy → Camera → allow desktop apps to use the camera.
+- **"Camera access is blocked"**: Windows Settings â†’ Privacy â†’ Camera â†’ allow desktop apps to use the camera.
 - **Tracking is jumpy**: add light in front of you, raise Smoothing, or press `C` to recalibrate.
 - **Actions trigger too easily**: lower Sensitivity or raise Cooldown.
 
@@ -145,7 +166,7 @@ deleted right after conversion.
 ## Project layout
 
 ```
-main.py                 launcher + local server + Office→PDF converter (stdlib only)
+main.py                 launcher + local server + Officeâ†’PDF converter (stdlib only)
 run_windows.bat         double-click launcher
 web/index.html          interface
 web/css/style.css       holographic HUD theme

@@ -1,15 +1,18 @@
 // AI Hand Detection Presentation — application controller.
 import { Scene3D } from "./scene3d.js";
 import { MatrixRain } from "./matrix.js";
-import { HandEngine } from "./hand.js";
+import { HandEngine, insecureCameraHint } from "./hand.js";
 import { Viewer, loadPdfEngine } from "./viewer.js";
+import { addRecent, getRecent, listRecent, removeRecent } from "./recent.js";
 
 const $ = (id) => document.getElementById(id);
 const body = document.body;
 // Streamlit serves this page as a component and adds ?streamlitUrl=... to its address.
 const streamlitHost = new URLSearchParams(location.search).has("streamlitUrl");
-// The local launcher (main.py) provides /api/* for Office conversion; Streamlit does not.
+// The local launcher (main.py) provides /api/* on the same origin. Under Streamlit, app.py starts
+// the same converter on 127.0.0.1 and passes its address in the component arguments.
 const serverMode = !streamlitHost && (location.protocol === "http:" || location.protocol === "https:");
+let converterBase = serverMode ? "" : null;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pad = (n) => String(n).padStart(2, "0");
@@ -18,14 +21,16 @@ const setText = (el, text) => { if (el.textContent !== text) el.textContent = te
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "bmp", "webp", "gif"]);
 const OFFICE_EXT = new Set(["pptx", "ppt", "ppsx", "pps", "odp", "docx", "doc", "odt", "rtf"]);
 const extOf = (file) => (file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "");
+const TRANSITIONS = ["auto", "cube", "flip", "push", "zoom", "hologram", "orbit", "door", "portal", "glitch", "shatter", "mix"];
 
 // ------------------------------------------------------------------ settings
 
-const SETTINGS_KEY = "ahdp.settings.v4";
+const SETTINGS_KEY = "ahdp.settings.v5";
 const DEFAULTS = {
-  sens: 72, smooth: 25, cool: 450, res: "640x480", fps: "60", zoom: "pinch", fx: "auto",
-  upDown: true, skeleton: true, mirror: true, exposure: true, video: false, pip: false,
+  sens: 72, smooth: 25, cool: 350, res: "640x480", fps: "60", zoom: "pinch", fx: "auto",
+  upDown: true, skeleton: true, mirror: true, exposure: true, pip: false,
   once: true, point: true, laser: true, camera: "", mode: "slide",
+  transition: "auto", detect: "turbo", flick: true, auto: true,
 };
 const settings = (() => {
   try {
@@ -63,7 +68,7 @@ function trackingOn() {
 function updateStatusRight() {
   const s = viewer.state();
   const page = !s.loaded ? "NO FILE" : s.kind === "html" ? "DOCUMENT" : `PAGE ${s.index + 1}/${s.count}`;
-  setText($("statusRight"), `MODE: ${settings.mode === "slide" ? "SLIDE" : "DOCUMENT"} · TRACKING: ${trackingOn() ? "ON" : "OFF"} · ${page}`);
+  setText($("statusRight"), `MODE: ${settings.mode === "slide" ? "SLIDE" : "DOCUMENT"} · FX: ${settings.transition.toUpperCase()} · TRACKING: ${trackingOn() ? "ON" : "OFF"} · ${page}`);
 }
 
 let toastTimer = 0;
@@ -73,6 +78,12 @@ function toast(message, kind = "", ms = 1800) {
   t.className = `toast show ${kind}`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+}
+
+function restartAnimation(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
 }
 
 function flashDirection(action) {
@@ -89,6 +100,11 @@ function flashDirection(action) {
   el.classList.remove("go", "zoom");
   void el.offsetWidth;
   el.classList.add(zoom ? "zoom" : "go");
+  // A light sweep along the screen edge the hand moved toward.
+  const edge = $("edgeFlash");
+  edge.dataset.dir = zoom ? "center" : action.replace("POINT_", "").toLowerCase();
+  restartAnimation(edge, "on");
+  restartAnimation($("stage"), "pulse");
 }
 
 function updatePresentHud(handState) {
@@ -128,6 +144,7 @@ const viewer = new Viewer({
   onError: (err) => log(`Render error: ${err.message}`, "err"),
 });
 viewer.mode = settings.mode;
+viewer.transition = settings.transition;
 
 const hand = new HandEngine({
   video: $("video"),
@@ -144,19 +161,30 @@ const hand = new HandEngine({
 
 // ------------------------------------------------------------------ viewer
 
+let shownIndex = -1;
 function onViewerChange(s) {
   body.classList.toggle("has-doc", s.loaded);
+  scene?.setBackground(s.loaded);
+  if (s.loaded && s.index !== shownIndex && !reduceMotion) {
+    requestAnimationFrame(() => ["pageInfo", "hudPage"].forEach((id) => restartAnimation($(id), "pop")));
+  }
+  shownIndex = s.loaded ? s.index : -1;
   $("home").hidden = s.loaded;
   setText($("fileName"), s.loaded ? s.name : "NO FILE LOADED");
   const label = s.kind === "images" ? "IMAGE" : "PAGE";
   setText($("pageInfo"), !s.loaded ? "PAGE -- / --" : s.kind === "html" ? "DOCUMENT" : `${label} ${pad(s.index + 1)} / ${pad(s.count)}`);
-  $("progressBar").style.width = s.loaded && s.kind !== "html" && s.count ? `${((s.index + 1) / s.count) * 100}%` : s.loaded ? "100%" : "0";
+  const pct = s.loaded && s.kind !== "html" && s.count ? `${((s.index + 1) / s.count) * 100}%` : s.loaded ? "100%" : "0";
+  $("progressBar").style.width = pct;
+  $("presentBar").style.width = pct;
   setText($("zoomVal"), `${Math.round(s.zoom * 100)}%`);
-  for (const id of ["btnPrev", "btnNext", "btnZoomOut", "btnZoomIn", "btnFit", "btnClose"]) $(id).disabled = !s.loaded;
+  for (const id of ["btnPrev", "btnNext", "btnZoomOut", "btnZoomIn", "btnFit", "btnClose", "btnGrid"]) $(id).disabled = !s.loaded;
   if (s.loaded && s.kind !== "html") {
     $("btnPrev").disabled = s.index === 0;
     $("btnNext").disabled = s.index >= s.count - 1;
+  } else {
+    $("btnGrid").disabled = true;
   }
+  if (!s.loaded) closeGrid();
   updateModeUI();
   updateStatusRight();
   updatePresentHud();
@@ -170,12 +198,12 @@ function updateModeUI() {
   }
 }
 
-function navigate(dir, axis = "x") {
+function navigate(dir, motion) {
   if (!viewer.loaded) {
     setStatus("Open a PDF to use page navigation.");
     return false;
   }
-  const result = viewer.go(dir, axis);
+  const result = viewer.go(dir, motion);
   if (result === "edge") {
     toast(dir > 0 ? "LAST PAGE REACHED" : "FIRST PAGE REACHED", "warn");
     setStatus(dir > 0 ? "Already on the last page." : "Already on the first page.");
@@ -189,7 +217,7 @@ function scrollDocument(dir) {
   if (settings.mode === "document" || viewer.state().kind === "html") {
     if (viewer.scroll(dir)) setStatus("Document scroll command");
   } else if (viewer.loaded) {
-    navigate(dir > 0 ? 1 : -1, "y");
+    navigate(dir > 0 ? 1 : -1, dir > 0 ? "up" : "down");
   }
 }
 
@@ -211,7 +239,34 @@ function setMode(mode) {
   if (viewer.state().kind === "html" && mode === "slide") toast("WORD FALLBACK VIEW SCROLLS AS A DOCUMENT", "warn", 2600);
 }
 
-async function openFiles(files) {
+function setTransition(name, announce = true) {
+  settings.transition = TRANSITIONS.includes(name) ? name : "auto";
+  saveSettings();
+  viewer.transition = settings.transition;
+  for (const b of $("transGrid").querySelectorAll("button")) {
+    const active = b.dataset.t === settings.transition;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-checked", String(active));
+  }
+  setText($("transName"), settings.transition.toUpperCase());
+  updateStatusRight();
+  if (announce) {
+    toast(`SLIDE ANIMATION · ${settings.transition.toUpperCase()}`);
+    log(`Slide animation: ${settings.transition}.`);
+  }
+}
+
+/** Plays a transition on the current slide without changing page (the TEST buttons). */
+function previewTransition(motion) {
+  if (!viewer.loaded || viewer.effectiveMode !== "slide") {
+    toast("ADD A FILE IN SLIDE MODE TO PREVIEW ANIMATIONS", "warn", 2400);
+    return;
+  }
+  viewer._showSlide(1, motion);
+  flashDirection({ left: "LEFT", right: "RIGHT", up: "UP", down: "DOWN", in: "ZOOM_IN", out: "ZOOM_OUT" }[motion]);
+}
+
+async function openFiles(files, { remember = true } = {}) {
   if (!files.length) return;
   const exts = files.map(extOf);
   const name = files.length > 1 ? `${files.length} files` : files[0].name;
@@ -227,10 +282,11 @@ async function openFiles(files) {
       else if (OFFICE_EXT.has(ext)) await openOffice(file, ext);
       else throw new Error(`Unsupported file type ".${ext}". Use PDF, PowerPoint, Word or an image.`);
       if (files.length > 1) log("Several files were selected; opened the first one. Select only images to build a slideshow.", "warn");
+      if (remember) addRecent(file).then(refreshRecent).catch(() => {});
     }
     const s = viewer.state();
     log(`Loaded ${s.name} · ${s.kind === "html" ? "document" : `${s.count} page(s)`}`, "ok");
-    setStatus(`Loaded: ${s.name}`);
+    setStatus(`Loaded: ${s.name} · press PRESENT (P) for full-screen hand control`);
     toast(`LOADED · ${s.name.toUpperCase()}`);
     scene?.pulse("LOAD");
   } catch (err) {
@@ -246,12 +302,12 @@ async function openOffice(file, ext) {
   showLoader(`CONVERTING ${ext.toUpperCase()} → PDF LOCALLY`);
   log(`Converting ${file.name} to PDF on this PC…`);
   try {
-    if (!serverMode) {
+    if (converterBase === null) {
       throw new Error(streamlitHost
-        ? "Office conversion is not available in the web version; export the file to PDF first"
+        ? "Office conversion needs this app running on your own PC (streamlit run app.py); export the file to PDF first"
         : "the converter needs the launcher (python main.py)");
     }
-    const res = await fetch(`/api/convert?name=${encodeURIComponent(file.name)}`, {
+    const res = await fetch(`${converterBase}/api/convert?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
       headers: { "X-Requested-With": "hand-presenter", "Content-Type": "application/octet-stream" },
       body: file,
@@ -290,6 +346,85 @@ function closeFile() {
   log("File closed.");
 }
 
+// ------------------------------------------------------------------ recent files
+
+async function refreshRecent() {
+  let items = [];
+  try {
+    items = await listRecent();
+  } catch {
+    return; // IndexedDB unavailable (private window): no recent list
+  }
+  const list = $("recentList");
+  list.replaceChildren(...items.map((it) => {
+    const li = document.createElement("li");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "recent-open";
+    open.title = `Open ${it.name}`;
+    open.textContent = it.name;
+    open.addEventListener("click", async () => {
+      const file = await getRecent(it.name).catch(() => null);
+      if (file) openFiles([file]);
+      else refreshRecent();
+    });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "recent-del";
+    del.title = "Remove from recent files";
+    del.setAttribute("aria-label", `Remove ${it.name}`);
+    del.textContent = "✕";
+    del.addEventListener("click", () => removeRecent(it.name).then(refreshRecent));
+    li.append(open, del);
+    return li;
+  }));
+  $("recentPanel").hidden = items.length === 0;
+}
+
+// ------------------------------------------------------------------ slide grid
+
+let gridToken = 0;
+async function openGrid() {
+  const s = viewer.state();
+  if (!s.loaded || s.kind === "html") return;
+  const token = ++gridToken;
+  const items = $("gridItems");
+  items.replaceChildren();
+  $("gridView").hidden = false;
+  body.classList.add("grid-open");
+  const cells = Array.from({ length: s.count }, (_, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `grid-cell${i === s.index ? " current" : ""}`;
+    b.style.animationDelay = `${Math.min(i, 24) * 22}ms`;
+    const num = document.createElement("span");
+    num.textContent = pad(i + 1);
+    b.append(num);
+    b.addEventListener("click", () => {
+      closeGrid();
+      viewer.goTo(i);
+    });
+    items.append(b);
+    return b;
+  });
+  for (let i = 0; i < cells.length; i++) {
+    const c = await viewer.thumbnail(i).catch(() => null);
+    if (token !== gridToken) return;
+    if (c) cells[i].prepend(c);
+  }
+}
+
+function closeGrid() {
+  gridToken++;
+  $("gridView").hidden = true;
+  body.classList.remove("grid-open");
+}
+
+function toggleGrid() {
+  if ($("gridView").hidden) openGrid();
+  else closeGrid();
+}
+
 // ------------------------------------------------------------------ camera & gestures
 
 const STATE_TEXT = {
@@ -297,7 +432,10 @@ const STATE_TEXT = {
   LOCKING: ["LOCKING", "Hold your hand still…"],
   READY: ["READY", "Move your hand to control"],
   STILL: ["STILL", "Hand still · no action"],
-  "RE-ARM": ["RE-ARM", "Return to center or hold still"],
+  "RE-ARM": ["RE-ARM", "Pause your hand briefly"],
+  RETURN: ["RETURN", "Return stroke ignored"],
+  CONFIRM: ["CONFIRM", "Swipe detected · confirming"],
+  DIAGONAL: ["DIAGONAL", "Move straight left, right, up or down"],
   COOLDOWN: ["COOLDOWN", "Waiting before next action"],
   LOCKED: ["DONE", "Lower your hand, then show it again"],
   POINT: ["POINTING", "Hold to confirm"],
@@ -310,7 +448,7 @@ function setMoveState(main, sub) {
   setText($("moveSub"), sub);
 }
 
-function camUI(state, title, text) {
+function camUI(state, title, text, fixUrl) {
   const pill = $("camPill");
   pill.className = `pill ${state === "live" ? "live" : state === "paused" ? "paused" : state === "err" ? "err" : ""}`;
   pill.textContent = { live: "LIVE", paused: "PAUSED", err: "ERROR", starting: "STARTING" }[state] || "OFFLINE";
@@ -320,6 +458,9 @@ function camUI(state, title, text) {
   off.classList.toggle("err", state === "err");
   if (title) $("camOffTitle").textContent = title;
   if (text) $("camOffText").textContent = text;
+  const fix = $("camFix");
+  fix.hidden = !fixUrl;
+  if (fixUrl) fix.href = fixUrl;
   $("btnStart").disabled = state === "live" || state === "paused" || state === "starting";
   $("btnPause").textContent = state === "paused" ? "▶ Resume" : "Ⅱ Pause";
   if (state !== "live" && state !== "paused") {
@@ -334,11 +475,13 @@ function camUI(state, title, text) {
   updateStatusRight();
 }
 
+let starting = false;
 async function startCamera() {
-  if (hand.running) {
-    setStatus("Camera is already running.");
+  if (hand.running || starting) {
+    if (hand.running) setStatus("Camera is already running.");
     return;
   }
+  starting = true;
   camUI("starting", "STARTING CAMERA", "Requesting webcam access…");
   try {
     if (!hand.ready) {
@@ -351,18 +494,22 @@ async function startCamera() {
     setText($("camRes"), `${info.width}×${info.height}`);
     log(`Camera online: ${info.label} · ${info.width}×${info.height} @ ${info.fps || "?"} FPS`, "ok");
     if (info.maxFps && info.maxFps < Number(settings.fps)) {
-      log(`This camera's hardware maximum is ${info.maxFps} FPS (${settings.fps} requested), so it runs at its maximum.`, "warn");
+      log(`This camera's hardware maximum is ${info.maxFps} FPS (${settings.fps} requested), so it runs at its maximum. The hand HUD still animates at 60 FPS.`, "warn");
+    } else if (info.fps >= 59) {
+      log("60 FPS camera mode active.", "ok");
     }
     if (info.exposureMs) log(`Exposure locked at ${info.exposureMs.toFixed(1)} ms so the camera keeps its full frame rate.`, "ok");
     setMoveState("LOCKING", "Hold your hand still…");
     setStatus("Camera started. Hold your hand still briefly to calibrate.");
     refreshCameras().catch(() => {});
   } catch (err) {
-    camUI("err", "CAMERA ERROR", err.message);
+    camUI("err", "CAMERA ERROR", err.message, err.url);
     setMoveState("ERROR", "Camera unavailable");
     log(err.message, "err");
-    toast("CAMERA ERROR — SEE TRACKING PANEL", "err", 4000);
+    toast("CAMERA ERROR — SEE HAND SIGNAL PANEL", "err", 4000);
     setStatus(err.message);
+  } finally {
+    starting = false;
   }
 }
 
@@ -402,6 +549,27 @@ async function restartCamera() {
   if (!hand.running) return;
   hand.stop();
   await startCamera();
+}
+
+/** Starts the camera by itself once permission is granted (also when granted later). */
+async function watchCameraPermission() {
+  if (insecureCameraHint()) {
+    const hint = insecureCameraHint();
+    camUI("err", "CAMERA BLOCKED ON THIS ADDRESS", hint.message, hint.url);
+    log(hint.message, "err");
+    return;
+  }
+  let status = null;
+  try {
+    status = await navigator.permissions.query({ name: "camera" });
+    status.addEventListener("change", () => {
+      if (status.state === "granted" && settings.auto && !hand.running) startCamera();
+    });
+  } catch { /* Permissions API without camera support */ }
+  if (settings.auto && status?.state !== "denied") startCamera();
+  else if (status?.state === "denied") {
+    camUI("err", "CAMERA BLOCKED", "Camera permission is blocked for this page. Click the camera icon in the address bar → Allow, then press START CAMERA.");
+  }
 }
 
 let actionHoldUntil = 0;
@@ -474,14 +642,23 @@ function onHandResult({ event, hand: h, hud }) {
   scene?.setHand(hud.point, Boolean(h));
   const compass = $("compass");
   const dot = $("compassDot");
+  const hudDot = $("hudDot");
   if (hud.origin && hud.point && h) {
     const clamp = (v) => Math.max(-1.5, Math.min(1.5, v));
-    dot.style.setProperty("--dx", clamp((hud.point.x - hud.origin.x) / hud.threshold).toFixed(3));
-    dot.style.setProperty("--dy", clamp((hud.point.y - hud.origin.y) / hud.threshold).toFixed(3));
+    const dx = clamp((hud.point.x - hud.origin.x) / hud.tx).toFixed(3);
+    const dy = clamp((hud.point.y - hud.origin.y) / hud.ty).toFixed(3);
+    compass.style.setProperty("--p", hud.progress.toFixed(3));
+    dot.style.setProperty("--dx", dx);
+    dot.style.setProperty("--dy", dy);
+    hudDot.style.setProperty("--dx", dx);
+    hudDot.style.setProperty("--dy", dy);
     compass.className = hud.armed ? "compass" : "compass rearm";
   } else {
     dot.style.setProperty("--dx", 0);
     dot.style.setProperty("--dy", 0);
+    hudDot.style.setProperty("--dx", 0);
+    hudDot.style.setProperty("--dy", 0);
+    compass.style.setProperty("--p", 0);
     compass.className = "compass idle";
   }
   setText($("stConf"), h ? `${Math.round(h.score * 100)}%` : "--");
@@ -494,7 +671,7 @@ function onHandResult({ event, hand: h, hud }) {
   if (event.zoom) onZoomGesture(event.zoom);
   if (event.laser) showLaser(event.laser);
   if (event.action) {
-    handleAction(event.action);
+    handleAction(event.action, event.flick);
     actionHoldUntil = performance.now() + 900;
   } else if (event.state === "ZOOM") {
     actionHoldUntil = 0;
@@ -504,35 +681,37 @@ function onHandResult({ event, hand: h, hud }) {
   }
 }
 
-function handleAction(action) {
+function handleAction(action, flick = false) {
   const s = viewer.state();
   const slide = settings.mode === "slide" && s.kind !== "html";
   let result;
+  if (!$("gridView").hidden) closeGrid();
   if (!s.loaded) {
     result = "Add a file to control it";
   } else {
+    // In Slide Mode the outgoing slide travels the way the hand moved.
     switch (action) {
       case "LEFT":
-        result = slide ? (navigate(-1) ? "Previous slide" : "First slide") : (viewer.pan(-1) ? "Pan left" : "Nothing to pan · zoom in");
+        result = slide ? (navigate(-1, "left") ? "Previous slide" : "First slide") : (viewer.pan(-1) ? "Pan left" : "Nothing to pan · zoom in");
         break;
       case "RIGHT":
-        result = slide ? (navigate(1) ? "Next slide" : "Last slide") : (viewer.pan(1) ? "Pan right" : "Nothing to pan · zoom in");
+        result = slide ? (navigate(1, "right") ? "Next slide" : "Last slide") : (viewer.pan(1) ? "Pan right" : "Nothing to pan · zoom in");
         break;
       case "UP":
         if (!slide) result = viewer.scroll(-1) ? "Scroll up" : "Top of document";
-        else if (settings.upDown) result = navigate(-1, "y") ? "Previous slide" : "First slide";
+        else if (settings.upDown) result = navigate(-1, "up") ? "Previous slide" : "First slide";
         else result = "No action in Slide Mode";
         break;
       case "DOWN":
         if (!slide) result = viewer.scroll(1) ? "Scroll down" : "End of document";
-        else if (settings.upDown) result = navigate(1, "y") ? "Next slide" : "Last slide";
+        else if (settings.upDown) result = navigate(1, "down") ? "Next slide" : "Last slide";
         else result = "No action in Slide Mode";
         break;
       case "POINT_RIGHT":
-        result = navigate(1) ? (slide ? "Next slide" : "Next page") : "Last page";
+        result = navigate(1, "in") ? (slide ? "Next slide" : "Next page") : "Last page";
         break;
       case "POINT_LEFT":
-        result = navigate(-1) ? (slide ? "Previous slide" : "Previous page") : "First page";
+        result = navigate(-1, "out") ? (slide ? "Previous slide" : "Previous page") : "First page";
         break;
       case "ZOOM_IN":
         zoomBy(0.15);
@@ -547,11 +726,8 @@ function handleAction(action) {
     }
   }
   const word = action.replace("_", " ");
-  setMoveState(word, result);
-  const mv = $("moveVal");
-  mv.classList.remove("flash");
-  void mv.offsetWidth;
-  mv.classList.add("flash");
+  setMoveState(word, flick ? `${result} · flick` : result);
+  restartAnimation($("moveVal"), "flash");
   const arrow = compassArrows[action.replace("POINT_", "")];
   if (arrow) {
     arrow.classList.add("hit");
@@ -560,7 +736,7 @@ function handleAction(action) {
   toast(`HAND ${word} → ${result.toUpperCase()}`);
   flashDirection(action);
   setStatus(`Hand moved ${word.toLowerCase()} → ${result}`);
-  log(`Gesture ${word} → ${result}`, "ok");
+  log(`Gesture ${word}${flick ? " (flick)" : ""} → ${result}`, "ok");
   scene?.pulse(action);
 }
 
@@ -568,17 +744,18 @@ let lastStats = null;
 let lowLightWarned = false;
 function onHandStats(s) {
   lastStats = s;
-  setText($("stCam"), Math.round(s.camFps).toString());
+  const max = s.track?.maxFps;
+  setText($("stCam"), `${Math.round(s.camFps)}${max ? `/${max}` : ""}`);
   setText($("stAi"), hand.paused ? "--" : Math.round(s.aiFps).toString());
   setText($("stLat"), s.latency && !hand.paused ? `${Math.round(s.latency)}ms` : "--");
   setText($("stEngine"), s.delegate);
-  setText($("camRate"), `● LIVE ${Math.round(s.camFps)} FPS`);
+  setText($("camRate"), `● LIVE ${Math.round(s.camFps)} FPS · HUD ${Math.round(s.hudFps)}`);
   const lightEl = $("stLight");
   if (s.light == null) {
     setText(lightEl, "--");
   } else {
     const low = s.light < 0.2;
-    setText(lightEl, low ? "LOW" : "GOOD");
+    setText(lightEl, s.gain > 1.05 ? `BOOST ×${s.gain.toFixed(1)}` : low ? "LOW" : "GOOD");
     lightEl.classList.toggle("warn", low);
     if (low && !lowLightWarned) {
       lowLightWarned = true;
@@ -594,8 +771,9 @@ function updateFpsChip() {
   const live = hand.running && lastStats;
   const cam = live ? Math.round(lastStats.camFps) : "--";
   const ai = live && !hand.paused ? Math.round(lastStats.aiFps) : "--";
-  const fx = scene && settings.fx !== "off" ? Math.round(scene.fps) : "--";
-  setText($("fpsChip"), `CAM ${cam} · AI ${ai} · FX ${fx}`);
+  const hud = live ? Math.round(lastStats.hudFps) : "--";
+  const fx = scene && settings.fx !== "off" && !body.classList.contains("presenting") ? Math.round(scene.fps) : "--";
+  setText($("fpsChip"), `CAM ${cam} · AI ${ai} · HUD ${hud} · FX ${fx}`);
 }
 
 async function refreshCameras() {
@@ -624,18 +802,19 @@ async function present() {
     $("fileInput").click();
     return;
   }
+  closeGrid();
   if (settings.mode !== "slide") setMode("slide");
   if (!document.fullscreenElement) await toggleFullscreen();
   if (!hand.running) await startCamera();
   else if (hand.paused) toggleTracking();
-  log("Presenting: full-screen slides, hand control on, camera image hidden.", "ok");
+  log("Presenting: full-screen slides, invisible hand control, no camera image.", "ok");
 }
 
 function applyPresenting(updateFx = true) {
   const on = body.classList.contains("presenting");
   body.classList.toggle("show-pip", settings.pip);
   hand.pipCanvas = on && settings.pip ? $("pipCanvas") : null;
-  // While presenting the sidebar is hidden: skip drawing its preview and pause the 3D scene,
+  // While presenting the sidebar is hidden: skip drawing its HUD and pause the 3D scene,
   // so the GPU and CPU go to hand detection.
   hand.previewEnabled = !on;
   if (!updateFx) return;
@@ -652,7 +831,11 @@ document.addEventListener("fullscreenchange", () => {
   body.classList.toggle("presenting", on);
   body.classList.remove("show-tools");
   applyPresenting();
+  // Auto quality: presenting always starts fitted to the screen; the slide is then re-rendered
+  // at full screen resolution by the viewer's resize handling.
+  if (on && viewer.loaded && viewer.zoom !== 1) viewer.setZoom(1, false);
   setStatus(on ? "Presenting · move the mouse to the top for tools · Esc to exit." : "Presenter mode closed.");
+  if (on) toast("PRESENTING · MOVE YOUR HAND TO CHANGE SLIDES", "", 2200);
   requestAnimationFrame(updateFocus);
 });
 
@@ -704,6 +887,7 @@ function bindUI() {
 
   $("btnPrev").addEventListener("click", () => navigate(-1));
   $("btnNext").addEventListener("click", () => navigate(1));
+  $("btnGrid").addEventListener("click", toggleGrid);
   $("btnZoomIn").addEventListener("click", () => zoomBy(0.1));
   $("btnZoomOut").addEventListener("click", () => zoomBy(-0.1));
   $("btnFit").addEventListener("click", () => {
@@ -716,6 +900,19 @@ function bindUI() {
   $("modeSeg").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-mode]");
     if (b) setMode(b.dataset.mode);
+  });
+  $("transGrid").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-t]");
+    if (!b) return;
+    setTransition(b.dataset.t);
+    if (viewer.loaded) previewTransition("left");
+  });
+  document.querySelector(".fx-test").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-test]");
+    if (b) previewTransition(b.dataset.test);
+  });
+  $("gridView").addEventListener("click", (e) => {
+    if (e.target === $("gridView") || e.target === $("gridItems")) closeGrid();
   });
 
   $("btnStart").addEventListener("click", startCamera);
@@ -746,7 +943,7 @@ function bindUI() {
 
   let wheelLock = 0;
   $("stage").addEventListener("wheel", (e) => {
-    if (!viewer.loaded) return;
+    if (!viewer.loaded || !$("gridView").hidden) return;
     if (e.ctrlKey) {
       e.preventDefault();
       zoomBy(e.deltaY < 0 ? 0.1 : -0.1);
@@ -757,7 +954,7 @@ function bindUI() {
       const now = performance.now();
       if (now < wheelLock || Math.abs(e.deltaY) < 8) return;
       wheelLock = now + 380;
-      navigate(e.deltaY > 0 ? 1 : -1);
+      navigate(e.deltaY > 0 ? 1 : -1, e.deltaY > 0 ? "up" : "down");
     }
   }, { passive: false });
 
@@ -769,15 +966,22 @@ function bindUI() {
       case "ArrowRight": navigate(1); break;
       case "ArrowUp": scrollDocument(-1); break;
       case "ArrowDown": scrollDocument(1); break;
+      case "PageUp": navigate(-1); break;
+      case "PageDown": navigate(1); break;
       case "+": case "=": zoomBy(0.1); break;
       case "-": case "_": zoomBy(-0.1); break;
       case "0": viewer.setZoom(1); setStatus("Zoom: 100%"); break;
       case " ": toggleTracking(); break;
-      case "Escape": if (!document.fullscreenElement) stopCamera(); break;
+      case "Escape":
+        if (!$("gridView").hidden) closeGrid();
+        else if (!document.fullscreenElement) stopCamera();
+        break;
       case "f": case "F": toggleFullscreen(); break;
       case "p": case "P": present(); break;
       case "o": case "O": pick(); break;
       case "c": case "C": recalibrate(); break;
+      case "g": case "G": toggleGrid(); break;
+      case "t": case "T": setTransition(TRANSITIONS[(TRANSITIONS.indexOf(settings.transition) + 1) % TRANSITIONS.length]); break;
       case "m": case "M": setMode(settings.mode === "slide" ? "document" : "slide"); break;
       default: return;
     }
@@ -803,11 +1007,12 @@ function bindSettings() {
     c.oncePerAppearance = settings.once;
     c.pointing = settings.point;
     c.laser = settings.laser;
+    c.flick = settings.flick;
     if (!settings.once) c.locked = false;
     hand.mirror = settings.mirror;
     hand.showSkeleton = settings.skeleton;
     hand.lockExposure = settings.exposure;
-    hand.showVideo = settings.video;
+    hand.turbo = settings.detect !== "balanced";
     applyPresenting(false);
   };
   for (const [key, fmt] of Object.entries(ranges)) {
@@ -827,7 +1032,7 @@ function bindSettings() {
     });
   }
 
-  const selects = { resSelect: "res", fpsSelect: "fps", zoomSelect: "zoom", fxSelect: "fx", camSelect: "camera" };
+  const selects = { resSelect: "res", fpsSelect: "fps", zoomSelect: "zoom", fxSelect: "fx", camSelect: "camera", detSelect: "detect" };
   for (const [id, key] of Object.entries(selects)) {
     const el = $(id);
     el.value = settings[key];
@@ -838,13 +1043,13 @@ function bindSettings() {
       apply();
       if (key === "fx") applyFx();
       if (key === "res" || key === "fps" || key === "camera") restartCamera();
-      if (key === "zoom") log(`Zoom gesture: ${el.options[el.selectedIndex].text}.`);
+      if (key === "zoom" || key === "detect") log(`${key === "zoom" ? "Zoom gesture" : "Detection"}: ${el.options[el.selectedIndex].text}.`);
     });
   }
 
   const toggles = {
     optUpDown: "upDown", optSkeleton: "skeleton", optMirror: "mirror", optExposure: "exposure",
-    optVideo: "video", optPip: "pip", optOnce: "once", optPoint: "point", optLaser: "laser",
+    optPip: "pip", optOnce: "once", optPoint: "point", optLaser: "laser", optFlick: "flick", optAuto: "auto",
   };
   for (const [id, key] of Object.entries(toggles)) {
     const el = $(id);
@@ -864,6 +1069,7 @@ function bindSettings() {
     });
   }
   apply();
+  setTransition(settings.transition, false);
 }
 
 // ------------------------------------------------------------------ boot
@@ -892,10 +1098,22 @@ function sysStatus(key, text, cls) {
 }
 
 async function checkConverters() {
-  if (streamlitHost) return "PDF · images · DOCX";
-  if (!serverMode) throw new Error("launcher not running · open via python main.py");
-  const res = await fetch("/api/info", { cache: "no-store" });
-  converters = (await res.json()).converters || [];
+  if (streamlitHost) {
+    const args = await streamlitArgs;
+    if (args.converter) converterBase = args.converter;
+  }
+  if (converterBase === null) {
+    if (streamlitHost) return "PDF · images · DOCX";
+    throw new Error("launcher not running · open via python main.py");
+  }
+  try {
+    const res = await fetch(`${converterBase}/api/info`, { cache: "no-store" });
+    converters = (await res.json()).converters || [];
+  } catch (err) {
+    converterBase = null;
+    if (streamlitHost) return "PDF · images · DOCX";
+    throw err;
+  }
   return converters.length ? converters.join(" + ") : "PDF & images only";
 }
 
@@ -923,16 +1141,27 @@ async function boot() {
     $("bootBar").style.width = `${(done / steps.length) * 100}%`;
   }
   bootLine("All systems online").ok("");
-  await sleep(reduceMotion ? 0 : 500);
+  await sleep(reduceMotion ? 0 : 450);
   $("boot").classList.add("done");
   body.classList.remove("booting");
   setTimeout(() => $("boot").remove(), 900);
   requestAnimationFrame(updateFocus);
-  log("System ready. Add your file and start the camera.", "ok");
+  log("System ready. Add your file; the camera starts by itself.", "ok");
   if (hand.ready) log(`Hand tracking engine: ${hand.delegate} on ${hand.engineMode === "WORKER" ? "a background thread" : "the main thread"}.`);
+  refreshRecent();
+  watchCameraPermission();
 }
 
 // ------------------------------------------------------------------ start
+
+// Streamlit sends the component arguments (the local converter address) in its first render message.
+const streamlitArgs = new Promise((resolve) => {
+  if (!streamlitHost) return resolve({});
+  addEventListener("message", (e) => {
+    if (e.data?.type === "streamlit:render") resolve(e.data.args || {});
+  });
+  setTimeout(() => resolve({}), 3000);
+});
 
 bindUI();
 bindSettings();
@@ -964,4 +1193,4 @@ function connectStreamlit() {
     /* parent on another origin: keep the initial height */
   }
 }
-window.ahdp = { viewer, hand, get scene() { return scene; }, settings };
+window.ahdp = { viewer, hand, get scene() { return scene; }, settings, handleAction, setTransition };
