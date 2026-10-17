@@ -67,21 +67,27 @@ st.markdown(
 
 
 def request_host():
-    """(hostname, is_local, is_https) of the address the visitor used to open the app."""
+    """(hostname, is_local, camera_blocked) for the address the visitor used to open the app.
+
+    The camera is only blocked on plain-http IP addresses, i.e. Streamlit's "Network URL" /
+    "External URL". Named hosts such as *.streamlit.app are served over https and work. (Proxies
+    do not always forward X-Forwarded-Proto, so it is not relied on; the page itself also checks
+    window.isSecureContext and shows its own fix-it link.)
+    """
     try:
         headers = st.context.headers
     except Exception:
         return "", True, False
     host = headers.get("Host", "") or ""
     name = host.rsplit(":", 1)[0].strip("[]") if host.count(":") <= 1 or host.startswith("[") else host
-    is_local = name in ("localhost", "") or name.endswith(".localhost")
-    if not is_local:
-        try:
-            is_local = ipaddress.ip_address(name).is_loopback
-        except ValueError:
-            pass
-    is_https = (headers.get("X-Forwarded-Proto", "") or "").lower() == "https"
-    return name, is_local, is_https
+    if name in ("localhost", "") or name.endswith(".localhost"):
+        return name, True, False
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return name, False, False  # a domain name: https in practice
+    https = (headers.get("X-Forwarded-Proto", "") or "").lower() == "https"
+    return name, ip.is_loopback, not ip.is_loopback and not https
 
 
 @st.cache_resource(show_spinner=False)
@@ -96,8 +102,8 @@ def start_converter():
     return f"http://127.0.0.1:{server.server_address[1]}"
 
 
-host, is_local, is_https = request_host()
-if not is_local and not is_https:
+host, is_local, camera_blocked = request_host()
+if camera_blocked:
     port = st.get_option("server.port")
     st.warning(
         f"**Camera blocked on this address ({host}).** Browsers only allow the webcam on localhost "
