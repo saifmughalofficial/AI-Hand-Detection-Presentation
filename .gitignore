@@ -1,0 +1,8 @@
+# Python virtual environment (not needed: main.py uses only the standard library)
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
