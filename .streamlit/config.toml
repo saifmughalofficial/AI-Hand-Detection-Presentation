@@ -1,11 +1,19 @@
-[theme]
-base = "dark"
-backgroundColor = "#010603"
-primaryColor = "#00ff66"
-textColor = "#cfffe0"
+# No port here: Streamlit Cloud must use its default 8501. Locally main.py passes --server.port.
+[server]
+headless = true
+runOnSave = false
+maxUploadSize = 300
+enableStaticServing = true   # serves static/mediapipe (hand model) to the browser
+
+[browser]
+gatherUsageStats = false
 
 [client]
 toolbarMode = "minimal"
 
-[browser]
-gatherUsageStats = false
+[theme]
+base = "dark"
+primaryColor = "#00ff66"
+backgroundColor = "#010603"
+secondaryBackgroundColor = "#06180c"
+textColor = "#cfffe0"
