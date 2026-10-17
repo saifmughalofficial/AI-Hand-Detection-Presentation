@@ -17,6 +17,24 @@ and all libraries and the AI model are bundled in `web/vendor`.
 
 Options: `python main.py --port 9000`, or `python main.py --no-window` to print the URL and open it yourself.
 
+## Deploy on Streamlit
+
+`app.py` serves the same interface as a full-page Streamlit app:
+
+```bat
+pip install streamlit
+streamlit run app.py
+```
+
+**Streamlit Community Cloud:** push this repo to GitHub, open [share.streamlit.io](https://share.streamlit.io),
+choose **Create app**, select this repository, branch `main`, main file `app.py`, then **Deploy**.
+`requirements.txt` installs Streamlit automatically.
+
+Hand tracking runs in each visitor's browser, so the visitor's own webcam is used and no video is
+uploaded to the server. The browser asks for camera permission the first time. In the web version,
+open PDF, image or DOCX files. PowerPoint conversion needs Office or LibreOffice on a local PC, so
+export PPTX to PDF first, or use the desktop launcher.
+
 ## How to use
 
 1. **Add your file**: click *ADD YOUR FILE* or drag and drop a file anywhere.

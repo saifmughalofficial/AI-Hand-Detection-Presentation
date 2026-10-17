@@ -1,4 +1,6 @@
-# No third-party Python packages are needed: main.py uses only the standard library.
+# Streamlit deployment (app.py). Streamlit Community Cloud installs this file automatically.
+streamlit>=1.36
+
+# The desktop launcher (python main.py) needs no packages: it uses only the standard library.
 # Hand tracking (MediaPipe), PDF rendering (PDF.js) and 3D graphics (Three.js) are bundled in web/vendor.
-# The packages below are only for the old Tkinter version in legacy/ and are optional:
-#   opencv-python mediapipe PyMuPDF Pillow
+# The old Tkinter version in legacy/ would additionally need: opencv-python mediapipe PyMuPDF Pillow

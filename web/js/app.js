@@ -6,7 +6,10 @@ import { Viewer, loadPdfEngine } from "./viewer.js";
 
 const $ = (id) => document.getElementById(id);
 const body = document.body;
-const serverMode = location.protocol === "http:" || location.protocol === "https:";
+// Streamlit serves this page as a component and adds ?streamlitUrl=... to its address.
+const streamlitHost = new URLSearchParams(location.search).has("streamlitUrl");
+// The local launcher (main.py) provides /api/* for Office conversion; Streamlit does not.
+const serverMode = !streamlitHost && (location.protocol === "http:" || location.protocol === "https:");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pad = (n) => String(n).padStart(2, "0");
@@ -243,7 +246,11 @@ async function openOffice(file, ext) {
   showLoader(`CONVERTING ${ext.toUpperCase()} → PDF LOCALLY`);
   log(`Converting ${file.name} to PDF on this PC…`);
   try {
-    if (!serverMode) throw new Error("the converter needs the launcher (python main.py)");
+    if (!serverMode) {
+      throw new Error(streamlitHost
+        ? "Office conversion is not available in the web version; export the file to PDF first"
+        : "the converter needs the launcher (python main.py)");
+    }
     const res = await fetch(`/api/convert?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
       headers: { "X-Requested-With": "hand-presenter", "Content-Type": "application/octet-stream" },
@@ -885,6 +892,7 @@ function sysStatus(key, text, cls) {
 }
 
 async function checkConverters() {
+  if (streamlitHost) return "PDF · images · DOCX";
   if (!serverMode) throw new Error("launcher not running · open via python main.py");
   const res = await fetch("/api/info", { cache: "no-store" });
   converters = (await res.json()).converters || [];
@@ -934,5 +942,26 @@ setInterval(() => setText($("clock"), new Date().toLocaleTimeString([], { hour12
 setInterval(updateFpsChip, 500);
 if (serverMode) setInterval(() => fetch("/api/ping", { cache: "no-store" }).catch(() => {}), 3000);
 addEventListener("resize", updateFocus);
+if (streamlitHost) connectStreamlit();
 boot();
+
+// Minimal Streamlit component handshake: announce readiness and size the frame to the browser window.
+function connectStreamlit() {
+  const send = (type, data = {}) => window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
+  const viewportHeight = () => {
+    try {
+      return window.parent.innerHeight;
+    } catch {
+      return 900;
+    }
+  };
+  const fit = () => send("streamlit:setFrameHeight", { height: Math.max(640, viewportHeight()) });
+  send("streamlit:componentReady", { apiVersion: 1 });
+  fit();
+  try {
+    window.parent.addEventListener("resize", fit);
+  } catch {
+    /* parent on another origin: keep the initial height */
+  }
+}
 window.ahdp = { viewer, hand, get scene() { return scene; }, settings };

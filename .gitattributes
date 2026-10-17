@@ -1,6 +1,2 @@
 # Auto detect text files and perform LF normalization
 * text=auto
-
-# GitHub language bar: count the Python application code. The web interface (HTML/CSS/JS)
-# and the bundled third-party libraries in web/vendor are excluded from the statistics.
-web/** linguist-vendored
